@@ -13,8 +13,9 @@ import { resetPassword } from "../services/auth/resetPassword.js";
 import { me } from "../services/auth/me.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { rateLimiter } from "../middleware/rateLimiter.js";
-import { resetPasswordSchema } from "../schemas/resetPasswordSchema.js";
-import { validateBody } from "../middleware/validateBody.js";
+import { validateBody } from "../middleware/validate.js";
+import { loginInputSchema } from "../schemas/auth.js";
+
 
 export const authRouter = Router();
 
@@ -57,6 +58,50 @@ authRouter.post(
 function getClientIp(req: Request): string {
   const forwarded = req.headers["x-forwarded-for"];
   if (typeof forwarded === "string") {
+    return forwarded.split(",")[0].trim();
+  }
+  return req.ip || req.socket.remoteAddress || "unknown";
+}
+
+
+/**
+ * POST /api/v1/auth/login
+ * Login with email and password
+ *
+ * Validation runs after rate limiting so abuse prevention
+ * still applies even to malformed requests.
+ */
+authRouter.post(
+  "/login",
+  authRouteRateLimiters.login,
+  validateBody(loginInputSchema),
+  async (req: Request, res: Response) => {
+    try {
+      const { email, password } = req.body;
+      const result = await login({ email, password });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof AppError) {
+        res.status(error.status).json({
+          error: error.message,
+          code: error.code,
+        });
+        return;
+      }
+      const message = error instanceof Error ? error.message : "Login failed";
+      res.status(401).json({ error: message });
+    }
+  }
+);
+
+/**
+ * Extract client IP address from request.
+ * Handles proxied requests with X-Forwarded-For header.
+ */
+function getClientIp(req: Request): string {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string") {
+    // Take the first IP in the chain (original client)
     return forwarded.split(",")[0].trim();
   }
   return req.ip || req.socket.remoteAddress || "unknown";
