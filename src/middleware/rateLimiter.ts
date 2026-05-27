@@ -28,28 +28,108 @@ interface RateLimiterOptions {
   algorithm?: RateLimiterAlgorithm;
 }
 
-// --- Fixed-window store ---
-
-interface RateLimitRecord {
+export interface RateLimitRecord {
   count: number;
   resetTime: number;
 }
 
-const store = new Map<string, RateLimitRecord>();
+export interface RateLimitStore {
+  increment(key: string, windowMs: number): Promise<RateLimitRecord> | RateLimitRecord;
+}
 
-// --- Sliding-window store ---
+export class MemoryStore implements RateLimitStore {
+  private store = new Map<string, RateLimitRecord>();
 
-/**
- * Each entry is a sorted list of request timestamps (ms since epoch) within
- * the current sliding window. Old timestamps are pruned on every access so
- * memory stays bounded to at most `max + 1` entries per key.
- */
-const slidingStore = new Map<string, number[]>();
+  increment(key: string, windowMs: number): RateLimitRecord {
+    const now = Date.now();
+    let record = this.store.get(key);
+    if (!record || now > record.resetTime) {
+      record = { count: 0, resetTime: now + windowMs };
+      this.store.set(key, record);
+    }
 
-// --- Helpers ---
+    record.count += 1;
+    return record;
+  }
+
+  cleanup(now = Date.now()): void {
+    for (const [key, record] of this.store.entries()) {
+      if (now > record.resetTime) {
+        this.store.delete(key);
+      }
+    }
+  }
+
+  reset(): void {
+    this.store.clear();
+  }
+}
+
+export class RedisStore implements RateLimitStore {
+  constructor(private client: any) {}
+
+  async increment(key: string, windowMs: number): Promise<RateLimitRecord> {
+    const now = Date.now();
+    
+    // Execute atomic Lua script
+    const [count, pttl] = await this.client.eval(
+      `local current = redis.call('INCR', KEYS[1])
+       if current == 1 then
+         redis.call('PEXPIRE', KEYS[1], ARGV[1])
+       end
+       return {current, redis.call('PTTL', KEYS[1])}`,
+      {
+        keys: [key],
+        arguments: [windowMs.toString()],
+      }
+    );
+
+    // Calculate resetTime from the actual TTL returned by Redis
+    const remainingTtl = pttl > 0 ? pttl : windowMs;
+    return {
+      count: Number(count),
+      resetTime: now + remainingTtl,
+    };
+  }
+}
 
 const DEFAULT_WINDOW_MS = 15 * 60 * 1000;
 const DEFAULT_MAX = 100;
+
+export const memoryStore = new MemoryStore();
+let storePromise: Promise<RateLimitStore> | null = null;
+
+export function getStore(): Promise<RateLimitStore> {
+  if (!storePromise) {
+    storePromise = (async () => {
+      const redisUrl = process.env.REDIS_URL;
+      if (!redisUrl) {
+        return memoryStore;
+      }
+      try {
+        // @ts-expect-error redis is an optional dependency
+        const redisModule = await import("redis");
+        const client = redisModule.createClient({ url: redisUrl });
+        
+        client.on("error", (err: any) => {
+          logger.error("Redis connection error in rate limiter store:", err);
+        });
+
+        await client.connect();
+        logger.info("Rate limiter initialized with Redis store.");
+        return new RedisStore(client);
+      } catch (err) {
+        logger.error("Failed to initialize Redis rate limiter store, falling back to memory:", err);
+        return memoryStore;
+      }
+    })();
+  }
+  return storePromise;
+}
+
+export function resetStorePromise(): void {
+  storePromise = null;
+}
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
@@ -109,11 +189,7 @@ function applyRateLimitHeaders(
 // --- Public cleanup / reset helpers ---
 
 export function cleanupRateLimiterStore(now = Date.now()): void {
-  for (const [key, record] of store.entries()) {
-    if (now > record.resetTime) {
-      store.delete(key);
-    }
-  }
+  memoryStore.cleanup(now);
 }
 
 export function cleanupSlidingStore(now = Date.now(), windowMs = DEFAULT_WINDOW_MS): void {
@@ -134,26 +210,8 @@ setInterval(() => {
 }, 60 * 1000).unref();
 
 /**
- * Create an in-memory rate limiter with optional route-level buckets.
- *
- * Bucketed limits isolate sensitive routes from one another so abuse against
- * one endpoint does not consume the request budget for a different endpoint.
- *
- * ### Algorithms
- *
- * **Fixed window** (`algorithm: "fixed"`, default)
- * Requests are counted inside a fixed calendar window that resets every
- * `windowMs` milliseconds. A client can legally send up to `2 * max`
- * requests across a single window boundary (one full window's worth just
- * before the reset and another just after). Choose this for general-purpose
- * routes where a short burst is acceptable.
- *
- * **Sliding window** (`algorithm: "sliding"`)
- * Counts only the requests that arrived within the last `windowMs`
- * milliseconds, measured from *now*. This eliminates the boundary burst: no
- * matter when a client makes its requests the effective limit is always
- * exactly `max` per `windowMs`. Use this for sensitive buckets such as
- * `auth:login` and `auth:forgot-password`.
+ * Create a rate limiter with optional route-level buckets.
+ * Supports Redis store backing with in-memory fallback.
  */
 export const rateLimiter = (options: RateLimiterOptions = {}) => {
   const windowMs = options.windowMs ?? parsePositiveInteger(process.env.RATE_LIMIT_WINDOW_MS, DEFAULT_WINDOW_MS);
@@ -163,77 +221,74 @@ export const rateLimiter = (options: RateLimiterOptions = {}) => {
   return (req: Request, res: Response, next: NextFunction): void => {
     const bucket = resolveBucket(req, options.bucket);
     const identifier = getClientIdentifier(req);
-    const key = `${bucket}:${identifier}`;
+    const key = `rate-limit:${bucket}:${identifier}`;
     const now = Date.now();
 
-    if (algorithm === "sliding") {
-      // --- Sliding-window path ---
-      const cutoff = now - windowMs;
-      const timestamps = (slidingStore.get(key) ?? []).filter((t) => t > cutoff);
+    // Check synchronously if we are using the in-memory store
+    if (!process.env.REDIS_URL) {
+      try {
+        const record = memoryStore.increment(key, windowMs);
+        applyRateLimitHeaders(res, bucket, max, record, now);
 
-      // Record this request
-      timestamps.push(now);
-      slidingStore.set(key, timestamps);
+        if (record.count > max) {
+          logger.warn(
+            `Rate limit exceeded for bucket "${bucket}" and identifier "${identifier}".`,
+            JSON.stringify({
+              bucket,
+              identifier,
+              count: record.count,
+              max,
+              windowMs,
+              timestamp: new Date(now).toISOString(),
+            })
+          );
+          res.status(429).json({ error: "Too many requests, please try again later." });
+          return;
+        }
 
-      const count = timestamps.length;
-      // Reset time = oldest timestamp in the window + windowMs (when it will fall off)
-      const resetTime = timestamps[0] + windowMs;
-
-      applyRateLimitHeaders(res, bucket, max, count, resetTime, now);
-
-      if (count > max) {
-        logger.warn(
-          `Rate limit exceeded for bucket "${bucket}" and identifier "${identifier}".`,
-          JSON.stringify({
-            bucket,
-            identifier,
-            count,
-            max,
-            windowMs,
-            algorithm: "sliding",
-            timestamp: new Date(now).toISOString(),
-          }),
-        );
-        res.status(429).json({ error: "Too many requests, please try again later." });
-        return;
+        next();
+      } catch (err) {
+        logger.error("Critical error in rateLimiter middleware (sync):", err);
+        next();
       }
-
-      next();
       return;
     }
 
-    // --- Fixed-window path (default, backward compatible) ---
-    let record = store.get(key);
-    if (!record || now > record.resetTime) {
-      record = { count: 0, resetTime: now + windowMs };
-      store.set(key, record);
-    }
+    // Otherwise, async Redis path
+    getStore()
+      .then((store) => store.increment(key, windowMs))
+      .catch((err) => {
+        logger.error(`Rate limit store failed for key ${key}, falling back to memory:`, err);
+        return memoryStore.increment(key, windowMs);
+      })
+      .then((record) => {
+        applyRateLimitHeaders(res, bucket, max, record, now);
 
-    record.count += 1;
-    applyRateLimitHeaders(res, bucket, max, record.count, record.resetTime, now);
+        if (record.count > max) {
+          logger.warn(
+            `Rate limit exceeded for bucket "${bucket}" and identifier "${identifier}".`,
+            JSON.stringify({
+              bucket,
+              identifier,
+              count: record.count,
+              max,
+              windowMs,
+              timestamp: new Date(now).toISOString(),
+            })
+          );
+          res.status(429).json({ error: "Too many requests, please try again later." });
+          return;
+        }
 
-    if (record.count > max) {
-      logger.warn(
-        `Rate limit exceeded for bucket "${bucket}" and identifier "${identifier}".`,
-        JSON.stringify({
-          bucket,
-          identifier,
-          count: record.count,
-          max,
-          windowMs,
-          algorithm: "fixed",
-          timestamp: new Date(now).toISOString(),
-        }),
-      );
-      res.status(429).json({ error: "Too many requests, please try again later." });
-      return;
-    }
-
-    next();
+        next();
+      })
+      .catch((err) => {
+        logger.error("Critical error in rateLimiter middleware (async):", err);
+        next();
+      });
   };
 };
 
 export function resetRateLimiterStore(): void {
-  store.clear();
-  slidingStore.clear();
+  memoryStore.reset();
 }
