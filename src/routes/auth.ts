@@ -19,9 +19,11 @@ import { validateBody } from "../middleware/validateBody.js";
 export const authRouter = Router();
 
 const authRouteRateLimiters = {
-  login: rateLimiter({ bucket: "auth:login", max: 10 }),
+  // Sliding window: eliminates boundary burst on sensitive auth endpoints
+  login: rateLimiter({ bucket: "auth:login", max: 10, algorithm: "sliding" }),
+  forgotPassword: rateLimiter({ bucket: "auth:forgot-password", max: 5, algorithm: "sliding" }),
+  // Fixed window is fine for less sensitive endpoints
   refresh: rateLimiter({ bucket: "auth:refresh", max: 20 }),
-  forgotPassword: rateLimiter({ bucket: "auth:forgot-password", max: 5 }),
   resetPassword: rateLimiter({ bucket: "auth:reset-password", max: 5 }),
   me: rateLimiter({ bucket: "auth:me", max: 60 }),
 };
@@ -55,7 +57,6 @@ authRouter.post(
 function getClientIp(req: Request): string {
   const forwarded = req.headers["x-forwarded-for"];
   if (typeof forwarded === "string") {
-    // Take the first IP in the chain (original client)
     return forwarded.split(",")[0].trim();
   }
   return req.ip || req.socket.remoteAddress || "unknown";
@@ -107,15 +108,13 @@ authRouter.post("/signup", async (req: Request, res: Response) => {
   try {
     const { email, password, website } = req.body;
 
-    // Pass IP and honeypot field to signup service
     const result = await signup({
       email,
       password,
       ipAddress: clientIp,
-      website, // Honeypot field - should be empty
+      website,
     });
 
-    // Add rate limit headers to successful response
     const headers = getSignupRateLimitHeaders(clientIp, email);
     Object.entries(headers).forEach(([key, value]) => {
       res.setHeader(key, value);
@@ -123,9 +122,7 @@ authRouter.post("/signup", async (req: Request, res: Response) => {
 
     res.status(201).json(result);
   } catch (error) {
-    // Handle SignupError with appropriate status codes
     if (error instanceof SignupError) {
-      // Add rate limit headers even on error
       const email = req.body.email || "";
       const headers = getSignupRateLimitHeaders(clientIp, email);
       Object.entries(headers).forEach(([key, value]) => {
@@ -148,7 +145,6 @@ authRouter.post("/signup", async (req: Request, res: Response) => {
 /**
  * GET /api/v1/auth/signup/availability
  * Check if signup is available for the current IP
- * Useful for pre-validation before showing signup form
  */
 authRouter.get("/signup/availability", (req: Request, res: Response) => {
   const clientIp = getClientIp(req);
