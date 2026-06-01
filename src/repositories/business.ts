@@ -1,4 +1,5 @@
 import crypto from 'crypto'
+import { decodeCursor, encodeCursor } from '../utils/pagination.js'
 
 export interface Business {
   id: string
@@ -90,17 +91,13 @@ export async function list(options: BusinessListOptions): Promise<PaginatedBusin
   }
   
   if (cursor) {
-    try {
-      const decoded = JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8'));
-      if (decoded.value !== undefined && decoded.id !== undefined) {
-        values.push(decoded.value);
-        values.push(decoded.id);
-        const valIdx = values.length - 1;
-        const idIdx = values.length;
-        conditions.push(`(${sortColumn}, id) ${op} ($${valIdx}, $${idIdx})`);
-      }
-    } catch (e) {
-      // Ignore invalid cursor
+    const decoded = decodeCursor(cursor)
+    if (decoded) {
+      values.push(decoded.value)
+      values.push(decoded.id)
+      const valIdx = values.length - 1
+      const idIdx = values.length
+      conditions.push(`(${sortColumn}, id) ${op} ($${valIdx}, $${idIdx})`)
     }
   }
   
@@ -127,9 +124,9 @@ export async function list(options: BusinessListOptions): Promise<PaginatedBusin
   
   let nextCursor: string | undefined;
   if (hasMore) {
-    const lastItem = items[items.length - 1];
-    const sortValue = sortBy === 'createdAt' ? lastItem.createdAt : lastItem.name;
-    nextCursor = Buffer.from(JSON.stringify({ value: sortValue, id: lastItem.id })).toString('base64');
+    const lastItem = items[items.length - 1]
+    const sortValue = sortBy === 'createdAt' ? lastItem.createdAt : lastItem.name
+    nextCursor = encodeCursor({ value: sortValue, id: lastItem.id })
   }
   
   return { items, nextCursor };

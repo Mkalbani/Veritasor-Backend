@@ -192,17 +192,19 @@ describe('Admin Routes', () => {
   });
 
   describe('GET /audit-logs', () => {
-    it('should return all audit logs', async () => {
+    it('should return paginated audit logs', async () => {
       const mockLogs = [
         { id: 'log1', action: 'UPDATE_USER' },
         { id: 'log2', action: 'DELETE_USER' },
       ];
-      vi.mocked(auditLogRepository.getAllAuditLogs).mockResolvedValue(mockLogs as any);
+      vi.mocked(auditLogRepository.queryAuditLogs).mockResolvedValue({ data: mockLogs, nextCursor: null, hasMore: false } as any);
 
       const response = await request(app).get('/api/v1/admin/audit-logs');
 
       expect(response.status).toBe(200);
-      expect(response.body).toHaveLength(2);
+      expect(response.body.data).toHaveLength(2);
+      expect(response.body.nextCursor).toBeNull();
+      expect(response.body.hasMore).toBe(false);
     });
   });
 });

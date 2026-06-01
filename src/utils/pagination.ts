@@ -33,4 +33,30 @@ export function formatPaginatedResponse<T>(data: T[], total: number, page: numbe
   }
 }
 
+export type CursorToken = {
+  value: string
+  id: string
+}
+
+export function encodeCursor(payload: CursorToken): string {
+  return Buffer.from(JSON.stringify(payload)).toString('base64')
+}
+
+export function decodeCursor(cursor?: string): CursorToken | null {
+  if (!cursor) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8'))
+    if (parsed && typeof parsed.value === 'string' && typeof parsed.id === 'string') {
+      return { value: parsed.value, id: parsed.id }
+    }
+  } catch {
+    // ignore invalid cursor values
+  }
+
+  return null
+}
+
 export default { getPagination, formatPaginatedResponse }
