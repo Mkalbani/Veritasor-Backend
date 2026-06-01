@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "docs:routes": "tsx scripts/generate-routes.ts",
-    "docs:openapi": "tsx scripts/generate-openapi.ts"
+    "docs:openapi": "tsx scripts/generate-openapi.ts",
+    "audit:ci": "pnpm audit --prod --json | pnpm exec tsx scripts/check-audit.ts"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^14.5.0",
@@ -36,6 +37,7 @@
     "@types/pg": "^8.11.6",
     "@types/supertest": "^6.0.3",
     "@vitest/coverage-v8": "^1.6.1",
+    "@cyclonedx/cyclonedx-npm": "^4.2.1",
     "eslint": "^9.15.0",
     "fast-check": "^4.6.0",
     "jest": "^30.2.0",

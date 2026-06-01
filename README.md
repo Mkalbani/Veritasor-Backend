@@ -38,6 +38,25 @@ The shared rate limiter in [src/middleware/rateLimiter.ts](src/middleware/rateLi
 | `npm run start`  | Run compiled `dist/index.js`   |
 | `npm run lint`   | Run ESLint                     |
 | `npm run migrate`| Run database migrations        |
+| `npm run audit:ci` | Run dependency audit and allowlist validation |
+
+## Security audit
+
+This repository includes a GitHub Actions workflow at `.github/workflows/security-audit.yml` that runs:
+
+- `pnpm audit --prod --json` to detect vulnerabilities.
+- `scripts/check-audit.ts` to enforce `.audit-allowlist.json` for temporary, expiring exceptions.
+- A CycloneDX SBOM generation step that uploads `sbom/cyclonedx-sbom.xml` as a workflow artifact.
+
+Allowlist entries must include:
+
+- `id`: Advisory identifier
+- `package`: npm package name
+- `severity`: `low`, `moderate`, `high`, or `critical`
+- `reason`: Why the exception is allowed
+- `expires`: ISO 8601 expiration timestamp
+
+Expired allowlist entries are rejected.
 
 ## API Versioning
 
