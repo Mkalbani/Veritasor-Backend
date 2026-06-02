@@ -1,31 +1,5 @@
 import crypto from 'crypto'
-import { db as dbClient } from '../db/client.js'
-
-type BusinessRow = {
-  id: string
-  user_id: string
-  name: string
-  email: string
-  industry: string | null
-  description: string | null
-  website: string | null
-  created_at: Date | string
-  updated_at: Date | string
-}
-
-function toBusiness(row: BusinessRow): Business {
-  return {
-    id: row.id,
-    userId: row.user_id,
-    name: row.name,
-    email: row.email,
-    industry: row.industry,
-    description: row.description,
-    website: row.website,
-    createdAt: typeof row.created_at === 'string' ? row.created_at : row.created_at.toISOString(),
-    updatedAt: typeof row.updated_at === 'string' ? row.updated_at : row.updated_at.toISOString(),
-  }
-}
+import { decodeCursor, encodeCursor } from '../utils/pagination.js'
 
 export interface Business {
   id: string
@@ -117,17 +91,13 @@ export async function list(options: BusinessListOptions): Promise<PaginatedBusin
   }
   
   if (cursor) {
-    try {
-      const decoded = JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8'));
-      if (decoded.value !== undefined && decoded.id !== undefined) {
-        values.push(decoded.value);
-        values.push(decoded.id);
-        const valIdx = values.length - 1;
-        const idIdx = values.length;
-        conditions.push(`(${sortColumn}, id) ${op} ($${valIdx}, $${idIdx})`);
-      }
-    } catch (e) {
-      // Ignore invalid cursor
+    const decoded = decodeCursor(cursor)
+    if (decoded) {
+      values.push(decoded.value)
+      values.push(decoded.id)
+      const valIdx = values.length - 1
+      const idIdx = values.length
+      conditions.push(`(${sortColumn}, id) ${op} ($${valIdx}, $${idIdx})`)
     }
   }
   
@@ -154,9 +124,9 @@ export async function list(options: BusinessListOptions): Promise<PaginatedBusin
   
   let nextCursor: string | undefined;
   if (hasMore) {
-    const lastItem = items[items.length - 1];
-    const sortValue = sortBy === 'createdAt' ? lastItem.createdAt : lastItem.name;
-    nextCursor = Buffer.from(JSON.stringify({ value: sortValue, id: lastItem.id })).toString('base64');
+    const lastItem = items[items.length - 1]
+    const sortValue = sortBy === 'createdAt' ? lastItem.createdAt : lastItem.name
+    nextCursor = encodeCursor({ value: sortValue, id: lastItem.id })
   }
   
   return { items, nextCursor };
