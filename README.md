@@ -56,7 +56,35 @@ This repository includes a GitHub Actions workflow at `.github/workflows/securit
 - `scripts/check-audit.ts` to enforce `.audit-allowlist.json` for temporary, expiring exceptions.
 - A CycloneDX SBOM generation step that uploads `sbom/cyclonedx-sbom.xml` as a workflow artifact.
 
-Allowlist entries must include:
+## Security Tests
+
+[![Security Tests](https://github.com/Veritasor/Veritasor-Backend/actions/workflows/security-tests.yml/badge.svg)](https://github.com/Veritasor/Veritasor-Backend/actions/workflows/security-tests.yml)
+
+Multi-tenant authorization fuzz tests live in `tests/security/multitenant.fuzz.spec.ts`. They use [fast-check](https://github.com/dubzzz/fast-check) property-based testing to generate randomized cross-tenant scenarios and assert `requireBusinessAuth` rejects every off-tenant request, including nested resources (attestations under integrations).
+
+Run the security tests in isolation:
+
+```bash
+npx vitest run tests/security/multitenant.fuzz.spec.ts
+```
+
+**What is fuzz-tested:**
+
+| Scenario | Property | Expected outcome |
+|---|---|---|
+| Tenant A claims Tenant B's business | `requestingUser.id ≠ business.userId` | 403 `BUSINESS_NOT_FOUND` |
+| Spoofed `X-Business-Id` header | Non-existent or foreign business ID | 403 `BUSINESS_NOT_FOUND` |
+| Nested attestation access | Attacker requests route protected by foreign business | 403 `BUSINESS_NOT_FOUND` |
+| Suspended business (own owner) | `business.suspended = true` | 403 `BUSINESS_SUSPENDED` |
+| Injection characters in business ID | IDs outside `[a-zA-Z0-9\-_]{1,50}` | 400 `MISSING_BUSINESS_ID` |
+| DB failure during ownership check | `getById` throws | 403 `BUSINESS_NOT_FOUND` (never 500) |
+| Error response data | Any rejection path | No secrets, stack traces, or sensitive fields leaked |
+
+fast-check's shrinking automatically narrows any failing case to the minimal counterexample.
+
+## Security audit allowlist
+
+
 
 - `id`: Advisory identifier
 - `package`: npm package name
