@@ -24,6 +24,7 @@ import { integrationsShopifyRouter } from "./routes/integrations-shopify.js";
 import { integrationsStripeRouter } from "./routes/integrations-stripe.js";
 import { publicAttestationsRouter } from "./routes/publicAttestations.js";
 import usersRouter from "./routes/users.js";
+import { jwksManager } from "./utils/jwks.js";
 import { razorpayWebhookRouter } from "./routes/webhooks-razorpay.js";
 import adminRouter from "./routes/admin.js";
 import {
@@ -95,6 +96,18 @@ export function createApp(readinessReport: StartupReadinessReport): Express {
   app.use("/api/v1/admin", adminRouter);
   app.use("/api/admin", adminRouter);
 
+  app.get("/.well-known/jwks.json", async (_req: Request, res: Response) => {
+    await jwksManager.ensureLoaded()
+
+    const jwks = jwksManager.getJwksResponse()
+    const etag = jwksManager.getEtag()
+    const cacheSeconds = jwksManager.getCacheTtlSeconds()
+
+    res.set("Cache-Control", `public, max-age=${cacheSeconds}, stale-while-revalidate=60`)
+    res.set("ETag", etag)
+    res.json(jwks)
+  });
+
   // 5. Error Handling
   app.use(errorHandler);
 
@@ -134,6 +147,7 @@ export async function startServer(port: number): Promise<Server | HttpsServer> {
   }
 
   const application = createApp(readinessReport);
+  const { attachAttestationStream } = await import("./ws/attestationStream.js");
 
   return new Promise(async (resolve) => {
     let server: Server | HttpsServer;
@@ -167,5 +181,6 @@ export async function startServer(port: number): Promise<Server | HttpsServer> {
       console.log(`[Server] Veritasor Backend listening on port ${port} (mTLS: ${config.mtls.enabled})`);
       resolve(server);
     });
+    attachAttestationStream(server);
   });
 }
