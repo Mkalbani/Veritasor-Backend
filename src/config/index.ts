@@ -243,13 +243,11 @@ export const config = {
       token: parsedEnv.VAULT_TOKEN,
     },
   },
-  mtls: {
-    enabled: parseBooleanEnv("MTLS_ENABLED", parsedEnv.MTLS_ENABLED, false),
-    caPath: parsedEnv.MTLS_CA_PATH,
-    certPath: parsedEnv.MTLS_CERT_PATH,
-    keyPath: parsedEnv.MTLS_KEY_PATH,
-    cnAllowlist: parsedEnv.MTLS_CN_ALLOWLIST
-      ? parsedEnv.MTLS_CN_ALLOWLIST.split(",").map(s => s.trim()).filter(Boolean)
-      : [],
+  redis: {
+    /** Single-node Redis URL (redis[s]://...). Ignored when clusterNodes is set. */
+    url: parsedEnv.REDIS_URL,
+    /** Comma-separated cluster node list, e.g. "host1:7000,host2:7001". */
+    clusterNodes: parsedEnv.REDIS_CLUSTER_NODES,
+    tls: parseBooleanEnv("REDIS_TLS", parsedEnv.REDIS_TLS, false),
   },
 } as const;
