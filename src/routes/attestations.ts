@@ -7,6 +7,7 @@ import { validateBody, validateQuery } from '../middleware/validate.js';
 import * as attestationRepository from '../repositories/attestationRepository.js';
 import { businessRepository } from '../repositories/business.js';
 import { db } from '../db/client.js';
+import { createAuditLog } from '../repositories/auditLogRepository.js';
 import { ReadConsistency, type Attestation } from '../types/attestation.js';
 import { revokeAttestation as revokeAttestationService } from '../services/attestation/revoke.js';
 import type {
@@ -38,7 +39,10 @@ type RouteAttestation = {
   revokedAt?: string | null;
 };
 
-type SubmitAttestationParams = Omit<SorobanSubmitAttestationParams, 'sourcePublicKey' | 'signerSecret'>;
+type SubmitAttestationParams = Omit<SorobanSubmitAttestationParams, 'sourcePublicKey' | 'signerSecret'> & {
+  userId?: string;
+  businessId?: string;
+};
 
 type SubmitAttestationResult = SorobanSubmitAttestationResult;
 
@@ -269,7 +273,9 @@ async function revokeAttestation(id: string, reason?: string): Promise<RouteAtte
   };
 }
 
-async function submitOnChain(params: SubmitAttestationParams): Promise<SubmitAttestationResult> {
+async function submitOnChain(
+  params: SubmitAttestationParams & { userId?: string; businessId?: string },
+): Promise<SubmitAttestationResult> {
   const shouldSubmit = params.submit ?? true;
   const submissionEnabled = process.env.SOROBAN_SUBMIT_ENABLED === 'true';
 
@@ -319,6 +325,25 @@ async function submitOnChain(params: SubmitAttestationParams): Promise<SubmitAtt
       code === 'RESULT_VALIDATION_FAILED' ||
       code === 'RESULT_MISMATCH'
     ) {
+      if (params.userId && params.businessId) {
+        await createAuditLog({
+          userId: params.userId,
+          action: 'ATTESTATION_SUBMIT_FAILED',
+          resource: 'attestation',
+          resourceId: params.businessId,
+          metadata: {
+            outcome: 'submit_failed',
+            errorCode: code,
+            params: {
+              business: params.business,
+              period: params.period,
+              merkleRoot: params.merkleRoot,
+              timestamp: params.timestamp,
+              version: params.version,
+            },
+          },
+        }).catch(() => {});
+      }
       throw createHttpError(502, code, 'Soroban RPC request failed after applying the retry policy.');
     }
 
@@ -497,6 +522,8 @@ attestationsRouter.post(
       timestamp: payload.timestamp ?? Date.now(),
       version: payload.version,
       submit: payload.submit,
+      userId: req.user!.id,
+      businessId,
     });
 
     const submission = {

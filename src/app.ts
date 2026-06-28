@@ -31,6 +31,7 @@ import {
   runStartupDependencyReadinessChecks,
   StartupReadinessReport,
 } from "./startup/readiness.js";
+import { replayFailedSubmissions } from "./startup/replayFailedSubmissions.js";
 import { initializeOpenTelemetry } from "./tracing.js";
 
 export const telemetryReady = initializeOpenTelemetry();
@@ -145,6 +146,10 @@ export async function startServer(port: number): Promise<Server | HttpsServer> {
       .join("; ");
     console.warn(`[Startup] Proceeding with failed readiness checks: ${failedChecks}`);
   }
+
+  replayFailedSubmissions().catch((err) => {
+    console.warn(`[Startup] Failed submission replay encountered an error: ${err instanceof Error ? err.message : String(err)}`);
+  });
 
   const application = createApp(readinessReport);
   const { attachAttestationStream } = await import("./ws/attestationStream.js");
