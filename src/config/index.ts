@@ -26,6 +26,9 @@ export const envSchema = z.object({
   SOROBAN_CONTRACT_ID: z.string().default(""),
   SOROBAN_NETWORK_PASSPHRASE: z.string().default("Test SDF Network ; September 2015"),
   SOROBAN_RETRY_BUDGET_MAX_RETRIES: z.string().optional(),
+  REDIS_URL: z.string().url().optional(),
+  REDIS_CLUSTER_NODES: z.string().optional(),
+  REDIS_TLS: z.string().optional(),
   SECRET_LOADER: z.enum(["env", "file", "vault"]).default("env"),
   SECRET_FILE_PATH: z.string().optional(),
   VAULT_BASE_URL: z.string().url().optional(),
@@ -237,13 +240,11 @@ export const config = {
       token: parsedEnv.VAULT_TOKEN,
     },
   },
-  mtls: {
-    enabled: parseBooleanEnv("MTLS_ENABLED", parsedEnv.MTLS_ENABLED, false),
-    caPath: parsedEnv.MTLS_CA_PATH,
-    certPath: parsedEnv.MTLS_CERT_PATH,
-    keyPath: parsedEnv.MTLS_KEY_PATH,
-    cnAllowlist: parsedEnv.MTLS_CN_ALLOWLIST
-      ? parsedEnv.MTLS_CN_ALLOWLIST.split(",").map(s => s.trim()).filter(Boolean)
-      : [],
+  redis: {
+    /** Single-node Redis URL (redis[s]://...). Ignored when clusterNodes is set. */
+    url: parsedEnv.REDIS_URL,
+    /** Comma-separated cluster node list, e.g. "host1:7000,host2:7001". */
+    clusterNodes: parsedEnv.REDIS_CLUSTER_NODES,
+    tls: parseBooleanEnv("REDIS_TLS", parsedEnv.REDIS_TLS, false),
   },
 } as const;
