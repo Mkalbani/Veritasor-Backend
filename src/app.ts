@@ -134,6 +134,7 @@ export async function startServer(port: number): Promise<Server | HttpsServer> {
   }
 
   const application = createApp(readinessReport);
+  const { attachAttestationStream } = await import("./ws/attestationStream.js");
 
   return new Promise(async (resolve) => {
     let server: Server | HttpsServer;
@@ -167,5 +168,6 @@ export async function startServer(port: number): Promise<Server | HttpsServer> {
       console.log(`[Server] Veritasor Backend listening on port ${port} (mTLS: ${config.mtls.enabled})`);
       resolve(server);
     });
+    attachAttestationStream(server);
   });
 }
