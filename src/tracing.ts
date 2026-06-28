@@ -54,9 +54,14 @@ export async function initializeOpenTelemetry(): Promise<
       import("@opentelemetry/exporter-trace-otlp-http"),
     ]);
 
-    const traceExporter = new OTLPTraceExporter({
+    const rawExporter = new OTLPTraceExporter({
       url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
     });
+
+    const { SanitizingSpanExporter } = await import(
+      "./tracing/sanitizer.js"
+    );
+    const traceExporter = new SanitizingSpanExporter(rawExporter);
 
     sdk = new NodeSDK({
       serviceName: process.env.OTEL_SERVICE_NAME ?? "veritasor-backend",
