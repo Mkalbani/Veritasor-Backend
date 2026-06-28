@@ -66,6 +66,15 @@ Allowlist entries must include:
 
 Expired allowlist entries are rejected.
 
+## Performance testing
+
+Peak-load k6 scenarios for `/api/v1/attestations` live in `ops/k6/`.
+
+- Local entrypoint: `npm run perf:k6:attestations`
+- Scenario docs: `ops/k6/README.md`
+- Nightly workflow: `.github/workflows/nightly-k6-attestations.yml`
+- Grafana dashboard: `ops/k6/grafana/peak-attestation-dashboard.json`
+
 ## API Versioning
 
 Routes may be mounted with an `/api/v{n}` prefix and/or legacy unversioned paths (e.g. `/api/attestations`). The server still resolves a major version for each request.

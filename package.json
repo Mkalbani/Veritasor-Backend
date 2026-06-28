@@ -8,6 +8,7 @@
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "lint": "eslint src",
+    "perf:k6:attestations": "k6 run ops/k6/peak-attestation.js",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "migrate": "tsx src/db/migrate.ts",
