@@ -26,6 +26,7 @@ export const envSchema = z.object({
   SOROBAN_CONTRACT_ID: z.string().default(""),
   SOROBAN_NETWORK_PASSPHRASE: z.string().default("Test SDF Network ; September 2015"),
   SOROBAN_RETRY_BUDGET_MAX_RETRIES: z.string().optional(),
+  SOROBAN_REPLAY_MAX_AGE_DAYS: z.string().optional(),
   SECRET_LOADER: z.enum(["env", "file", "vault"]).default("env"),
   SECRET_FILE_PATH: z.string().optional(),
   VAULT_BASE_URL: z.string().url().optional(),
@@ -214,6 +215,11 @@ export const config = {
       "SOROBAN_RETRY_BUDGET_MAX_RETRIES",
       parsedEnv.SOROBAN_RETRY_BUDGET_MAX_RETRIES,
       20,
+    ),
+    replayMaxAgeDays: parsePositiveIntEnv(
+      "SOROBAN_REPLAY_MAX_AGE_DAYS",
+      parsedEnv.SOROBAN_REPLAY_MAX_AGE_DAYS,
+      7,
     ),
   },
   secretLoader: {
