@@ -30,15 +30,33 @@ export const sorobanRetryBudgetExhaustedTotal = new Counter({
   registers: [metricsRegistry],
 });
 
-export const wsConnections = new Gauge({
-  name: "ws_attestation_connections",
-  help: "Number of active WebSocket connections on /api/v1/ws/attestations",
+// Webhook dead-letter queue depth (rows pending retry).
+// Scraped by a background collector; alert fires when backlog grows.
+export const webhookDlqDepth = new Gauge({
+  name: "webhook_dlq_depth",
+  help: "Number of unprocessed entries in the webhook dead-letter queue",
+  labelNames: ["provider"] as const,
   registers: [metricsRegistry],
 });
 
-export const wsMessagesTotal = new Counter({
-  name: "ws_attestation_messages_total",
-  help: "Total attestation events broadcast over WebSocket",
-  labelNames: ["type"] as const,
+// DB connection pool utilisation ratio (active / max).
+// Derived at scrape time; expose numerator and denominator for PromQL flexibility.
+export const pgPoolActiveConnections = new Gauge({
+  name: "pg_pool_active_connections",
+  help: "Number of active (checked-out) connections in the pg pool",
+  registers: [metricsRegistry],
+});
+
+export const pgPoolMaxConnections = new Gauge({
+  name: "pg_pool_max_connections",
+  help: "Configured maximum size of the pg connection pool",
+  registers: [metricsRegistry],
+});
+
+// Soroban submit lag: seconds between attestation creation and on-chain confirmation.
+export const sorobanSubmitLagSeconds = new Histogram({
+  name: "soroban_submit_lag_seconds",
+  help: "Time in seconds between attestation creation and Soroban on-chain confirmation",
+  buckets: [1, 5, 15, 30, 60, 120, 300],
   registers: [metricsRegistry],
 });
